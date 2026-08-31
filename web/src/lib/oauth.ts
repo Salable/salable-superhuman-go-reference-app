@@ -1,16 +1,30 @@
-// A deliberately small OAuth2 authorisation server — just enough for one
-// client: Superhuman's Packs platform.
+// A deliberately small OAuth2 authorisation server with two kinds of client:
 //
-// Superhuman's token exchange (per the Packs SDK docs) may send the client
-// secret either in the request body or as an Authorization: Basic header, and
-// the body may be form-encoded or JSON; all four combinations are accepted.
-// PKCE (S256) is supported and enabled in the Pack definition.
+//   - the static client (env-configured) used by Superhuman's Packs platform
+//     with manually entered credentials, and
+//   - dynamic clients registered at runtime via RFC 7591 Dynamic Client
+//     Registration — the mechanism MCP hosts (Claude, Codex, and Superhuman's
+//     own DCR mode) use to obtain credentials without a console.
+//
+// Token exchange accepts the client secret in the body or as Basic auth, and
+// form-encoded or JSON bodies. PKCE (S256) is supported everywhere and
+// REQUIRED for public dynamic clients (token_endpoint_auth_method "none").
 
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { config } from './config';
 import { prisma } from './db';
 
 export const AUTH_CODE_TTL_SECONDS = 10 * 60;
+
+export type ResolvedClient =
+  | { kind: 'static'; clientId: string }
+  | {
+      kind: 'dynamic';
+      clientId: string;
+      clientSecretHash: string | null;
+      redirectUris: string[];
+      tokenEndpointAuthMethod: string;
+    };
 
 function safeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
@@ -19,12 +33,47 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB);
 }
 
-export function isValidRedirectUri(uri: string): boolean {
-  return config.oauth.redirectUris.includes(uri);
+export async function resolveClient(clientId: string): Promise<ResolvedClient | null> {
+  if (safeEqual(clientId, config.oauth.clientId)) {
+    return { kind: 'static', clientId };
+  }
+  const client = await prisma.oAuthClient.findUnique({ where: { clientId } });
+  if (!client) return null;
+  return {
+    kind: 'dynamic',
+    clientId: client.clientId,
+    clientSecretHash: client.clientSecretHash,
+    redirectUris: client.redirectUris,
+    tokenEndpointAuthMethod: client.tokenEndpointAuthMethod
+  };
 }
 
-export function isValidClientId(clientId: string): boolean {
-  return safeEqual(clientId, config.oauth.clientId);
+export function isValidRedirectForClient(client: ResolvedClient, uri: string): boolean {
+  if (client.kind === 'static') return config.oauth.redirectUris.includes(uri);
+  return client.redirectUris.includes(uri);
+}
+
+/** RFC 7591 registration. Returns the raw secret once; only a hash is kept. */
+export async function registerDynamicClient(options: {
+  redirectUris: string[];
+  name: string;
+  tokenEndpointAuthMethod: string;
+}): Promise<{ clientId: string; clientSecret: string | null }> {
+  const clientId = `svc_${randomBytes(12).toString('hex')}`;
+  const isPublic = options.tokenEndpointAuthMethod === 'none';
+  const clientSecret = isPublic ? null : `svcs_${randomBytes(24).toString('hex')}`;
+  await prisma.oAuthClient.create({
+    data: {
+      clientId,
+      clientSecretHash: clientSecret
+        ? createHash('sha256').update(clientSecret).digest('hex')
+        : null,
+      name: options.name,
+      redirectUris: options.redirectUris,
+      tokenEndpointAuthMethod: options.tokenEndpointAuthMethod
+    }
+  });
+  return { clientId, clientSecret };
 }
 
 export async function createAuthCode(options: {
@@ -101,9 +150,32 @@ export async function parseTokenRequest(request: Request): Promise<TokenRequestP
   return params;
 }
 
-export function isValidClient(clientId?: string, clientSecret?: string): boolean {
-  if (!clientId || !clientSecret) return false;
-  return safeEqual(clientId, config.oauth.clientId) && safeEqual(clientSecret, config.oauth.clientSecret);
+/**
+ * Authenticates the token-endpoint caller. Static and confidential dynamic
+ * clients must present their secret; public dynamic clients authenticate by
+ * client_id alone and MUST complete PKCE (enforced by the token route via
+ * the returned `requiresPkce`).
+ */
+export async function authenticateTokenClient(
+  clientId?: string,
+  clientSecret?: string
+): Promise<{ clientId: string; requiresPkce: boolean } | null> {
+  if (!clientId) return null;
+
+  if (safeEqual(clientId, config.oauth.clientId)) {
+    if (!clientSecret || !safeEqual(clientSecret, config.oauth.clientSecret)) return null;
+    return { clientId, requiresPkce: false };
+  }
+
+  const client = await prisma.oAuthClient.findUnique({ where: { clientId } });
+  if (!client) return null;
+  if (client.clientSecretHash === null) {
+    return { clientId, requiresPkce: true };
+  }
+  if (!clientSecret) return null;
+  const presented = createHash('sha256').update(clientSecret).digest('hex');
+  if (!safeEqual(presented, client.clientSecretHash)) return null;
+  return { clientId, requiresPkce: false };
 }
 
 export function verifyPkce(

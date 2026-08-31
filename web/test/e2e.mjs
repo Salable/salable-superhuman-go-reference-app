@@ -156,5 +156,80 @@ check('pricing page renders live Salable plan (£9.99)', pricing.status === 200 
 const badConsent = await fetch(`${APP}/api/oauth/consent`, { method: 'POST', body: new URLSearchParams({ name: 'X', email: 'x@example.com', client_id: 'superhuman-go', redirect_uri: 'https://evil.example.com/cb', scope: 'agent' }) });
 check('consent rejects unlisted redirect_uri', badConsent.status === 400);
 
+
+// --- 12. Approach C: DCR + PKCE public client + MCP server -----------------
+const meta = await (await fetch(`${APP}/.well-known/oauth-authorization-server`)).json();
+check('AS metadata advertises registration + PKCE',
+  meta.registration_endpoint?.endsWith('/api/oauth/register') && meta.code_challenge_methods_supported?.includes('S256'));
+const prm = await (await fetch(`${APP}/.well-known/oauth-protected-resource`)).json();
+check('protected-resource metadata points at the MCP endpoint', prm.resource?.endsWith('/api/mcp'));
+
+const reg = await (await fetch(`${APP}/api/oauth/register`, {
+  method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ redirect_uris: ['http://localhost:9999/callback'], client_name: 'e2e MCP host', token_endpoint_auth_method: 'none' })
+})).json();
+check('DCR registers a public client (no secret)', !!reg.client_id && reg.client_secret === undefined, JSON.stringify(reg));
+
+const mcpVerifier = randomBytes(32).toString('base64url');
+const mcpChallenge = createHash('sha256').update(mcpVerifier).digest('base64url');
+const mcpConsent = await fetch(`${APP}/api/oauth/consent`, {
+  method: 'POST', redirect: 'manual',
+  body: new URLSearchParams({
+    name: 'MCP Test User', email: `mcp.user+${randomBytes(4).toString('hex')}@example.com`,
+    client_id: reg.client_id, redirect_uri: 'http://localhost:9999/callback',
+    state: 'mcp1', scope: 'agent', code_challenge: mcpChallenge, code_challenge_method: 'S256'
+  })
+});
+const mcpCode = new URL(mcpConsent.headers.get('location')).searchParams.get('code');
+check('consent works for a dynamically registered client', mcpConsent.status === 303 && !!mcpCode);
+
+const noPkce = await fetch(`${APP}/api/oauth/token`, {
+  method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ grant_type: 'authorization_code', code: mcpCode, redirect_uri: 'http://localhost:9999/callback', client_id: reg.client_id })
+});
+check('public client without code_verifier is rejected', noPkce.status === 400);
+
+// The code was consumed by the failed attempt; run consent again for a fresh one.
+const mcpConsent2 = await fetch(`${APP}/api/oauth/consent`, {
+  method: 'POST', redirect: 'manual',
+  body: new URLSearchParams({
+    name: 'MCP Test User', email: `mcp.user+${randomBytes(4).toString('hex')}@example.com`,
+    client_id: reg.client_id, redirect_uri: 'http://localhost:9999/callback',
+    state: 'mcp2', scope: 'agent', code_challenge: mcpChallenge, code_challenge_method: 'S256'
+  })
+});
+const mcpCode2 = new URL(mcpConsent2.headers.get('location')).searchParams.get('code');
+const mcpTokens = await (await fetch(`${APP}/api/oauth/token`, {
+  method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ grant_type: 'authorization_code', code: mcpCode2, redirect_uri: 'http://localhost:9999/callback', client_id: reg.client_id, code_verifier: mcpVerifier })
+})).json();
+check('PKCE token exchange for public client succeeds', !!mcpTokens.access_token, JSON.stringify(mcpTokens));
+
+const mcp = (method, params, token = mcpTokens.access_token) =>
+  fetch(`${APP}/api/mcp`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
+  });
+
+const unauth = await mcp('initialize', {}, null);
+check('MCP 401 challenge carries resource metadata', unauth.status === 401 && (unauth.headers.get('www-authenticate') ?? '').includes('oauth-protected-resource'));
+
+const init = await (await mcp('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'e2e', version: '0' } })).json();
+check('MCP initialize', init.result?.serverInfo?.name === 'snippet-vault');
+const toolsList = await (await mcp('tools/list', {})).json();
+check('MCP tools/list exposes the vault tools',
+  ['check_access', 'save_snippet', 'list_snippets', 'tag_snippet'].every(t => toolsList.result?.tools?.some(x => x.name === t)));
+
+const mcpSave = n => mcp('tools/call', { name: 'save_snippet', arguments: { content: `MCP snippet ${n}` } }).then(r => r.json());
+const m1 = await mcpSave(1); const m2 = await mcpSave(2); const m3 = await mcpSave(3);
+check('MCP saves respect the allowance', m1.result?.structuredContent?.ok === true && m2.result?.structuredContent?.ok === true);
+check('MCP paywall returns checkout link in tool result',
+  m3.result?.structuredContent?.paymentRequired === true && (m3.result?.content?.[0]?.text ?? '').includes('Checkout link'), JSON.stringify(m3));
+const mcpList = await (await mcp('tools/call', { name: 'list_snippets', arguments: {} })).json();
+check('MCP list_snippets returns the saved snippets', mcpList.result?.structuredContent?.snippets?.length === 2);
+const mcpAccess = await (await mcp('tools/call', { name: 'check_access', arguments: {} })).json();
+check('MCP check_access reports free plan', mcpAccess.result?.structuredContent?.plan === 'free');
+
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nALL CHECKS PASSED');
 process.exit(failures ? 1 : 0);

@@ -4,7 +4,7 @@
 
 import { NextResponse } from 'next/server';
 import { issueTokens, rotateTokens } from '@/lib/agent-auth';
-import { consumeAuthCode, isValidClient, parseTokenRequest, verifyPkce } from '@/lib/oauth';
+import { authenticateTokenClient, consumeAuthCode, parseTokenRequest, verifyPkce } from '@/lib/oauth';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +15,8 @@ function oauthError(error: string, description: string, status = 400) {
 export async function POST(request: Request) {
   const params = await parseTokenRequest(request);
 
-  if (!isValidClient(params.clientId, params.clientSecret)) {
+  const client = await authenticateTokenClient(params.clientId, params.clientSecret);
+  if (!client) {
     return oauthError('invalid_client', 'Client authentication failed.', 401);
   }
 
@@ -24,8 +25,14 @@ export async function POST(request: Request) {
 
     const authCode = await consumeAuthCode(params.code);
     if (!authCode) return oauthError('invalid_grant', 'Code is invalid, expired or already used.');
+    if (authCode.clientId !== client.clientId) {
+      return oauthError('invalid_grant', 'Code was issued to a different client.');
+    }
     if (params.redirectUri && params.redirectUri !== authCode.redirectUri) {
       return oauthError('invalid_grant', 'redirect_uri does not match the authorisation request.');
+    }
+    if (client.requiresPkce && !authCode.codeChallenge) {
+      return oauthError('invalid_grant', 'PKCE is required for this client.');
     }
     if (!verifyPkce(authCode.codeChallenge, authCode.codeChallengeMethod, params.codeVerifier)) {
       return oauthError('invalid_grant', 'PKCE verification failed.');

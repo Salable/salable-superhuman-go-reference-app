@@ -30,6 +30,20 @@ model User {
   entitlementCache EntitlementCache?
 }
 
+// OAuth2 clients registered via Dynamic Client Registration (RFC 7591).
+// Superhuman's static client lives in env vars; MCP hosts (Claude, Codex,
+// and Superhuman's own DCR mode) register here at runtime.
+model OAuthClient {
+  id                      String   @id @default(cuid())
+  clientId                String   @unique
+  // Null for public clients (token_endpoint_auth_method "none", PKCE-only).
+  clientSecretHash        String?
+  name                    String
+  redirectUris            String[]
+  tokenEndpointAuthMethod String   @default("client_secret_post")
+  createdAt               DateTime @default(now())
+}
+
 // One-time OAuth2 authorisation codes issued to Superhuman's token exchange.
 model AuthCode {
   id                  String    @id @default(cuid())

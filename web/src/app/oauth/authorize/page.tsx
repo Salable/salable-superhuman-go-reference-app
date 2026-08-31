@@ -3,7 +3,7 @@
 // submitting posts to /api/oauth/consent which mints the code and redirects
 // back to Superhuman.
 
-import { isValidClientId, isValidRedirectUri } from '@/lib/oauth';
+import { isValidRedirectForClient, resolveClient } from '@/lib/oauth';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,8 +24,9 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Se
   const codeChallengeMethod = first(params.code_challenge_method);
   const error = first(params.error);
 
+  const client = clientId ? await resolveClient(clientId) : null;
   const requestValid =
-    responseType === 'code' && isValidClientId(clientId) && isValidRedirectUri(redirectUri);
+    responseType === 'code' && !!client && isValidRedirectForClient(client, redirectUri);
 
   if (!requestValid) {
     return (

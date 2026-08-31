@@ -9,7 +9,7 @@
 import { NextResponse } from 'next/server';
 import { newGranteeId } from '@/lib/agent-auth';
 import { prisma } from '@/lib/db';
-import { createAuthCode, isValidClientId, isValidRedirectUri } from '@/lib/oauth';
+import { createAuthCode, isValidRedirectForClient, resolveClient } from '@/lib/oauth';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +30,8 @@ export async function POST(request: Request) {
   const codeChallengeMethod = get('code_challenge_method');
 
   // Re-validated here, not just at render time: the form is an untrusted client.
-  if (!isValidClientId(clientId) || !isValidRedirectUri(redirectUri)) {
+  const client = await resolveClient(clientId);
+  if (!client || !isValidRedirectForClient(client, redirectUri)) {
     return NextResponse.json({ error: 'invalid_client' }, { status: 400 });
   }
   if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {

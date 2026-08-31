@@ -56,6 +56,20 @@ pack.addNetworkDomain(APP_DOMAIN);
 // pack.addNetworkDomain("salable.app");
 
 /**
+ * Approach C: the same backend is also a monetised MCP server. Attaching it
+ * here exposes its tools (check_access, save_snippet, list_snippets,
+ * tag_snippet) alongside the formulas above; the platform routes MCP
+ * requests through the fetcher, so the user's OAuth token authenticates
+ * them exactly like the pass-through formulas. Other MCP hosts (Claude,
+ * Codex) attach to the same endpoint via OAuth2 Dynamic Client Registration
+ * — discovery starts at /.well-known/oauth-protected-resource.
+ */
+pack.addMCPServer({
+  name: "snippet_vault",
+  endpointUrl: `https://${APP_DOMAIN}/api/mcp`,
+});
+
+/**
  * Per-user OAuth against the web application. Connecting the agent walks the
  * user through /oauth/authorize (where they supply their details and the app
  * mints their grantee ID) and hands Superhuman the bearer token its fetcher

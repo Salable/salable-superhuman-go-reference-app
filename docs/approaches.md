@@ -48,11 +48,18 @@ Connecting the agent runs a standard OAuth2 authorisation-code flow **against th
 - **Grantee and Owner IDs are never email addresses** — the Salable API rejects them, and opaque IDs survive address changes.
 - In this single-user product, `owner = granteeId`. A team product would use the organisation as Owner and a Salable grantee **Group** (`grp_…`) with per-seat line items — the checkout call is the only code that changes.
 
+## Path 3 — the monetised MCP server (approach C)
+
+**Built in this repo.** The same backend is also a hosted MCP server at `/api/mcp` ([web/src/app/api/mcp/route.ts](../web/src/app/api/mcp/route.ts)): Streamable HTTP (POST-only JSON-RPC, like Salable's own server), exposing `check_access`, `save_snippet`, `list_snippets` and `tag_snippet` as tools. All three transports — REST, MCP, and the Pack formulas — call one shared capability layer ([web/src/lib/vault.ts](../web/src/lib/vault.ts)), so the entitlement guard is enforced identically however a request arrives. A paywalled `save_snippet` returns the message and a freshly minted checkout URL *as the tool result*, which is exactly what an MCP-hosted agent needs to relay in chat.
+
+Two kinds of client attach:
+
+- **The Pack itself** declares the server with `pack.addMCPServer` — Superhuman routes MCP requests through the fetcher, so the user's existing OAuth connection authenticates them. One backend, and the Pack gets both its formulas and the MCP tools.
+- **Any other MCP host** (Claude, Codex, …) discovers auth on its own: the endpoint's 401 challenge points at `/.well-known/oauth-protected-resource` (RFC 9728), which points at the authorisation-server metadata (RFC 8414), which advertises **Dynamic Client Registration** (RFC 7591) at `/api/oauth/register`. Public clients (`token_endpoint_auth_method: "none"`) must use PKCE; confidential ones get a secret. Every token still comes from a real user completing the same consent step — DCR mints client credentials, never access.
+
+This is why approach C matters commercially: the marginal cost of serving a second agent platform from an already-monetised backend is one endpoint, and the Salable integration carries over untouched.
+
 ## Approaches documented but not built
-
-### C — hosted MCP server
-
-A Pack may declare one hosted MCP server (`pack.addMCPServer`) speaking Streamable HTTP, tools only, with OAuth2 + dynamic client registration as the preferred auth. Enforcement then lives inside each MCP tool handler — the same trust model as Path 2 with different wiring. This is the forward-looking route (Superhuman's partner agents lean this way) and it makes one monetised server reusable from other MCP hosts (Claude, Codex, etc.). The backend in this repo would need: an MCP endpoint, DCR support, and the same guard functions — the entitlement logic is already factored to move there.
 
 ### D — out-of-band worker gating
 

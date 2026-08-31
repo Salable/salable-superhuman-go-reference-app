@@ -8,6 +8,7 @@ Superhuman Go has no native monetisation for third-party agents, so billing must
 
 - **Checking Salable's entitlement response before the agent is used in Go** (Path 1): the Pack calls the entitlement checker for the verified user and **verifies Salable's ECDSA signature in Pack code**, so the decision is trusted end-to-end — then gates entry accordingly.
 - **Pass-through API access to a Vercel web application** (Path 2): every agent action goes through the app, which re-checks entitlements server-side with the secret key, enforces the free allowance, records metered usage, and answers paywall hits with **402 + a freshly minted checkout URL** for the agent to relay in chat.
+- **A monetised MCP server** (Path 3): the same backend serves `/api/mcp` (Streamable HTTP, OAuth2 with **Dynamic Client Registration** and PKCE), so the Pack (via `addMCPServer`) *and* any MCP host — Claude, Codex — get the same entitlement-guarded tools, with paywall hits returning the checkout link as the tool result.
 - **Install-time identity capture**: connecting the agent runs OAuth2 against this app; the consent step creates the account and mints the stable, non-email **grantee ID** used for every Salable call.
 - **The commercial surface** any paid agent needs anyway: landing page, pricing page rendering the live Salable catalogue, personalised upgrade page, account page with billing portal, checkout success/cancel pages.
 - **Lifecycle**: HMAC-verified Salable webhooks invalidate the entitlement cache the moment a subscription changes, and usage lands on a Salable meter per save.
@@ -45,5 +46,5 @@ Full instructions: [docs/setup.md](docs/setup.md).
 ## Verification status
 
 - Both projects typecheck; the web app production-builds; the Pack passes `packs validate`.
-- A local end-to-end suite (mock Salable with genuine ECDSA-signed responses) exercises the full loop: consent → PKCE token exchange (both client-auth styles) → verified identity → free saves → 402 paywall with checkout link → HMAC webhook → entitlement flip → usage metering → Pack-side signature verification (including tamper rejection) → refresh-token rotation. 26/26 checks pass.
-- Not yet exercised against the live Salable API or a released Pack — field names for `plans?expand=…` and the owner-portal call are best-effort against the OpenAPI spec and flagged inline.
+- A local end-to-end suite (mock Salable with genuine ECDSA-signed responses) exercises the full loop — consent → PKCE token exchange → verified identity → free saves → 402 paywall → HMAC webhook → entitlement flip → usage metering → Pack-side signature verification → refresh rotation → **DCR + PKCE public client + MCP tool calls to the paywall**. 39/39 checks pass (`npm run test:e2e` in `web/`).
+- **Proven live** against the real Salable API (test mode), real Stripe sandbox checkouts, and Superhuman's real Pack runtime: the OAuth connect flow, `CheckAccess`/`WhoAmI` formulas, the Save snippet paywall (3 free saves, 4th refused), a sandbox purchase flipping the plan to Pro, and metered usage landing on the Salable meter.
