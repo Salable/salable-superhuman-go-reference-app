@@ -1,0 +1,19 @@
+node_modules/
+.next/
+.env
+.env.local
+.env*.local
+*.tsbuildinfo
+.DS_Store
+.vercel/
+dist/
+build/
+
+# Superhuman Packs CLI credentials — never commit these
+.coda.json
+.coda-credentials.json
+.coda-pack.json
+
+# Local context mirrors (read-only research material)
+.context/
+test/pack-verify-bundle.cjs

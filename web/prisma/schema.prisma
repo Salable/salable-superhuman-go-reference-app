@@ -1,0 +1,87 @@
+// Snippet Vault — reference data model.
+//
+// Deliberately small: the interesting parts of this application are the OAuth
+// hand-off with Superhuman Go and the Salable entitlement/checkout round trips.
+// Everything Salable owns (plans, subscriptions, usage) stays in Salable — the
+// only Salable-adjacent state held here is a short-TTL entitlement cache.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  // The Salable Grantee ID. Never an email address — Salable rejects email
+  // identifiers, and emails are neither stable nor opaque. In this single-user
+  // product the Owner is the same value.
+  granteeId String   @unique
+  email     String   @unique
+  name      String
+  createdAt DateTime @default(now())
+
+  authCodes        AuthCode[]
+  tokens           AgentToken[]
+  snippets         Snippet[]
+  entitlementCache EntitlementCache?
+}
+
+// One-time OAuth2 authorisation codes issued to Superhuman's token exchange.
+model AuthCode {
+  id                  String    @id @default(cuid())
+  code                String    @unique
+  userId              String
+  clientId            String
+  redirectUri         String
+  scope               String
+  codeChallenge       String?
+  codeChallengeMethod String?
+  expiresAt           DateTime
+  consumedAt          DateTime?
+  createdAt           DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Bearer credentials held by Superhuman on the user's behalf. Only hashes are
+// stored; the raw tokens exist once, in the token-endpoint response.
+model AgentToken {
+  id               String    @id @default(cuid())
+  accessTokenHash  String    @unique
+  refreshTokenHash String    @unique
+  userId           String
+  scope            String
+  accessExpiresAt  DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Snippet {
+  id        String   @id @default(cuid())
+  userId    String
+  content   String
+  source    String?
+  tags      String[] @default([])
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// Cached result of Salable's entitlement check, invalidated by webhook or TTL.
+model EntitlementCache {
+  userId    String   @id
+  payload   Json
+  fetchedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

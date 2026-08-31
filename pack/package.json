@@ -1,0 +1,19 @@
+{
+  "name": "snippet-vault-pack",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Snippet Vault — a paid Superhuman Go agent monetised with Salable (reference application).",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "validate": "packs validate src/pack.ts",
+    "execute": "packs execute src/pack.ts",
+    "upload": "packs upload src/pack.ts",
+    "release": "packs release src/pack.ts"
+  },
+  "dependencies": {
+    "@codahq/packs-sdk": "^1.17.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

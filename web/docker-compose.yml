@@ -1,0 +1,17 @@
+# Local Postgres for development. Production uses Neon (or any Postgres) via
+# DATABASE_URL on Vercel.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: snippet_vault
+    ports:
+      # Host port 5439 to stay clear of the other Postgres instances on this machine.
+      - '5439:5432'
+    volumes:
+      - snippet-vault-db:/var/lib/postgresql/data
+
+volumes:
+  snippet-vault-db:
