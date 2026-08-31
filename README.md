@@ -27,21 +27,43 @@ Superhuman Go has no native monetisation for third-party agents, so billing must
 
 **Snippet Vault** — save highlighted text from any page to a personal vault and find it again. Free: a monthly save allowance. Pro (flat-rate monthly via Salable): unlimited saves plus AI tagging. The capability is deliberately small; the monetisation flow is the subject.
 
-## Quick start
+## Build it yourself
+
+### Prerequisites
+
+- **Node 22+** and **Docker** (local Postgres for development).
+- A **[Salable](https://salable.app) account** (free tier is fine) with test-mode Stripe onboarding completed — gives you the test-mode secret and publishable API keys.
+- A **Superhuman account** with access to Docs/Go (to register and install the Pack).
+- A **[Vercel](https://vercel.com) account** for deployment (any Node host works; the repo assumes Vercel).
+
+### See it work with no accounts at all
+
+The end-to-end suite ships with a mock Salable that signs entitlement responses exactly the way the real platform does, so the entire monetisation loop runs locally first:
 
 ```bash
-# 1. Seed the Salable catalogue (test-mode secret key)
-cd web && SALABLE_API_KEY=sk_test_... npm run seed:salable
-
-# 2. Run the web app locally
-docker compose up -d && cp .env.example .env   # fill in values
-npx prisma db push && npm run dev
-
-# 3. Upload the Pack (after editing APP_DOMAIN in pack/src/pack.ts)
-cd ../pack && npm install && npx packs create src/pack.ts && npm run upload
+git clone <this repo> && cd salable-superhuman-go-reference-app
+cd web && npm install
+npm run test:e2e     # starts Postgres (Docker), a mock Salable, the app — 39 checks
 ```
 
-Full instructions: [docs/setup.md](docs/setup.md).
+### Run the app locally
+
+```bash
+cd web
+docker compose up -d                 # Postgres on localhost:5439
+cp .env.example .env                 # fill in the values as you go below
+npx prisma db push
+npm run dev                          # http://localhost:3000
+```
+
+### Wire up the real services
+
+1. **Salable**: put your test-mode secret key in `.env`, then `npm run seed:salable` — it idempotently creates the product, Pro plan, entitlements and meter, and prints `SALABLE_PRO_PLAN_ID` for `.env`. Add your publishable key too.
+2. **Deploy**: push `web/` to Vercel with the same env vars (plus a hosted Postgres — the seed script also registers the Salable webhook against your public URL and prints its signing secret).
+3. **The Pack**: set `APP_DOMAIN` in [pack/src/pack.ts](pack/src/pack.ts) to your deployment, then `cd pack && npm install && npx packs create src/pack.ts && npm run upload && npm run release -- 1`. In Pack settings, add the OAuth client ID/secret you invented for `.env`; the dialog shows the exact redirect URL to allowlist in `SHGO_OAUTH_REDIRECT_URIS`.
+4. **Install it** in Superhuman Go (*+ More agents*) or Superhuman Docs, connect, and follow [docs/runbook.md](docs/runbook.md) through the paywall with Stripe's test card `4242 4242 4242 4242`.
+
+Step-by-step detail, including the MCP attachment command for Claude/Codex and the sharp edges to expect from each API: [docs/setup.md](docs/setup.md).
 
 ## Verification status
 
