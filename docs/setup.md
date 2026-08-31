@@ -59,7 +59,17 @@ npm run dev
 
 To let the Pack call `salable.app` directly, request an additional network domain through [Superhuman Packs support](https://docs.superhuman.com/packs/build/latest/support/). Once approved: uncomment `pack.addNetworkDomain("salable.app")`, set `SALABLE_CHECK_MODE = "direct"`, paste your publishable key, and re-upload. The relay endpoint can stay — it is harmless.
 
-## 4. Verify
+## 4. The MCP server (approach C)
+
+Nothing extra to deploy — `/api/mcp` ships with the web app and the Pack attaches it via `addMCPServer`. To attach from another MCP host, point it at the endpoint and let OAuth discovery do the rest (the 401 challenge → RFC 9728 → RFC 8414 → Dynamic Client Registration):
+
+```bash
+claude mcp add --transport http snippet-vault https://<your-app>/api/mcp
+```
+
+The host registers a client automatically, opens `/oauth/authorize` for consent (the same passwordless form the Pack uses), and every tool call thereafter is entitlement-guarded server-side. Paywalled calls return the checkout link in the tool result.
+
+## 5. Verify
 
 Follow [runbook.md](runbook.md). In test mode, Stripe checkout accepts card `4242 4242 4242 4242` with any future expiry and any CVC.
 
