@@ -11,7 +11,7 @@
     "release": "packs release src/pack.ts"
   },
   "dependencies": {
-    "@codahq/packs-sdk": "^1.17.1"
+    "@codahq/packs-sdk": "^1.18.3"
   },
   "devDependencies": {
     "typescript": "^5.7.0"
